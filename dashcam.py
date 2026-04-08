@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
 """
-process_files.py
+dashcam.py
 
-A tiny utility that accepts a list of files on the command line and can
-perform different actions based on optional flags.
+A command-line tool that uses ffmpeg to concatenate a given list of video files.
 
 Supported options
 -----------------
---verbose       : Print a bit more detail for every file.
---dry-run       : Show what would happen, but don’t actually touch the file system.
 --output-dir DIR: If supplied, copy every valid input file into this directory
                   (creates the dir if it does not exist).
---hash          : Instead of copying, compute and display a SHA‑256 hash.
 """
 
 import argparse
-import hashlib
 import os
 import shutil
+import subprocess
 import sys
 
 
@@ -37,29 +33,11 @@ def parse_args() -> argparse.Namespace:
         help="Path to a file that should exist.",
     )
 
-    # Optional flags
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Print more information for each file.",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Show what would happen, but do not modify the file system.",
-    )
     parser.add_argument(
         "-o",
         "--output-dir",
         metavar="DIR",
         help="Copy every valid file into DIR.",
-    )
-    parser.add_argument(
-        "-H",
-        "--hash",
-        action="store_true",
-        help="Compute and display a SHA‑256 hash for each file instead of copying.",
     )
 
     return parser.parse_args()
@@ -68,20 +46,39 @@ def parse_args() -> argparse.Namespace:
 # --------------------------------------------------------------------------- #
 # Helper functions
 # --------------------------------------------------------------------------- #
-def compute_hash(path: str) -> str:
-    """Return the SHA‑256 hash of a file as a hex string."""
-    sha = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            sha.update(chunk)
-    return sha.hexdigest()
 
 
-def copy_file(src: str, dst_dir: str) -> None:
-    """Copy a file to the destination directory (keeping its base name)."""
-    os.makedirs(dst_dir, exist_ok=True)
-    dst = os.path.join(dst_dir, os.path.basename(src))
-    shutil.copy2(src, dst)
+def ffmpeg_concat(concat_list: str, filename: str):
+    # ffmpeg -f concat -safe 0 -i 2019_0821_121834_550.txt -c copy 2019_0821_121834_550.MOV
+
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        raise RuntimeError("ffmpeg not found in PATH")
+
+    ffmpeg_cmd = [
+        ffmpeg_path,
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        concat_list,
+        "-c",
+        "copy",
+        filename,
+        "-y",
+    ]
+
+    result = subprocess.run(
+        ffmpeg_cmd,
+        capture_output=True,  # capture stdout & stderr
+        text=True,  # return strings instead of bytes
+    )
+
+    # Raise an exception if ffmpeg failed (non‑zero exit code)
+    result.check_returncode()
+
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -90,59 +87,50 @@ def copy_file(src: str, dst_dir: str) -> None:
 def main() -> None:
     args = parse_args()
 
-    all_ok = True
+    all_files_ok = True
 
     for path in args.files:
         abs_path = os.path.abspath(path)
 
         if not os.path.isfile(abs_path):
             print(f"[ERR]  File not found: {abs_path}", file=sys.stderr)
-            all_ok = False
+            all_files_ok = False
             continue
 
-        if args.verbose:
-            print(f"[OK]   Processing: {abs_path}")
+        print(f"[OK]   File exists: {abs_path}")
 
-        # ---- hash mode ----------------------------------------------------
-        if args.hash:
-            h = compute_hash(abs_path)
-            print(f"SHA‑256: {h}   ({abs_path})")
-            continue
+    if not all_files_ok:
+        print("Some files are missing, aborted merge")
 
-        # ---- default mode (just confirm existence) ----------------------
-        if not args.dry_run:
-            print(f"[OK]   File exists: {abs_path}")
+    # Default output dir is home folder if not provided as command line argument
+    output_dir = os.path.expanduser("~") if not args.output_dir else args.output_dir
 
-    if all_ok:
+    # Build the ffmpeg concat file list
+    ff_file_list = ["file '" + filepath + "'" for filepath in args.files]
 
-        output_dir = os.path.expanduser("~") if not args.output_dir else args.output_dir
+    # Get the first video file name and extension
+    first_file = os.path.basename(args.files[0])
+    first_file_name = os.path.splitext(first_file)[0]
 
-        ff_file_list = ["file '" + filepath + "'" for filepath in args.files]
+    # Build the ffmpeg concat file list txt file path
+    ff_file_list_path = os.path.join(output_dir, first_file_name + ".txt")
+    ff_file_output = os.path.join(output_dir, first_file)
 
-        first_file_name = os.path.splitext(os.path.basename(args.files[0]))[0]
+    # Write the ffmpeg concat file list to disk
+    with open(ff_file_list_path, "w", encoding="utf-8") as f:
+        for line in ff_file_list:
+            f.write(line + "\n")
 
-        ff_file_list_path = os.path.join(output_dir, first_file_name + ".txt")
-        
-        print(ff_file_list_path)
+    #
+    try:
+        proc = ffmpeg_concat(ff_file_list_path, ff_file_output)
+    except subprocess.CalledProcessError as e:
+        print(f"ffmpeg failed (code {e.returncode})")
+        print("STDOUT:", e.stdout)
+        print("STDERR:", e.stderr)
+        sys.exit(e.returncode)
 
-        # with open(f"{output_dir}/{first_file_name}.txt", "w", encoding="utf-8") as f:
-        #     for line in ff_file_list:
-        #         f.write(line + "\n")
-
-        # # ---- copy mode ----------------------------------------------------
-        # if args.output_dir:
-        #     if args.dry_run:
-        #         print(f"[DRY]  Would output {abs_path} to {args.output_dir}")
-        #     else:
-        #         try:
-        #             copy_file(abs_path, args.output_dir)
-        #             print(f"[COPY] {abs_path} -> {args.output_dir}")
-        #         except Exception as e:
-        #             print(f"[ERR]  Could not copy {abs_path}: {e}", file=sys.stderr)
-        #             all_ok = False
-
-    # Exit code: 0 if all files were OK, otherwise non‑zero
-    sys.exit(0 if all_ok else 1)
+    os.remove(ff_file_list_path)
 
 
 # --------------------------------------------------------------------------- #

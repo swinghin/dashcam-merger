@@ -2,18 +2,30 @@
 
 A command-line tool that uses ffmpeg to concatenate a given list of video files.
 
+## Usage
+
+Open your terminal of choice, type in `python3 merge.py `, then drag your list of files into the terminal window. Or type in the file names one by one if you really hate yourself.
+
+To specify the output directory, add `-o ` and drag in your desired folder, or create a file named `defaults.json` liek this example:
+
+```json
+{
+  "output_dir": "/Volumes/Download",
+}
+```
+
 ## Example usage
 
-Concatenate two video files `191901_00.TS` `192001_01.TS` and save to home directory
+Concatenate two video files `191901_00.TS` `192001_01.TS` and save to current working directory (or `output_dir` specified in `defaults.json`)
 
-```
-python3 dashcam.py 191901_00.TS 192001_01.TS
+```bash
+python3 merge.py 191901_00.TS 192001_01.TS
 ```
 
-Concatenate two video files `191901_00.TS` `192001_01.TS` and save to specified directory `/Volumes/Download`
+Concatenate two video files `191901_00.TS` `192001_01.TS` and save to specified directory `/Volumes/Download` (also overrides `output_dir` in `defaults.json`)
 
-```
-python3 dashcam.py 191901_00.TS 192001_01.TS -o /Volumes/Download
+```bash
+python3 merge.py 191901_00.TS 192001_01.TS -o /Volumes/Download
 ```
 
 ## Why does this exist

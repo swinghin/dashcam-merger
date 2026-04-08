@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-dashcam.py
+merge.py
 
 A command-line tool that uses ffmpeg to concatenate a given list of video files.
 
 Supported options
 -----------------
---output-dir DIR: If supplied, copy every valid input file into this directory
-                  (creates the dir if it does not exist).
+--output-dir DIR: If supplied, output concatentated file to this directory
 """
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -88,6 +88,9 @@ def main() -> None:
     args = parse_args()
 
     all_files_ok = True
+    default_cfg = {}
+
+    output_dir = os.getcwd()
 
     for path in args.files:
         abs_path = os.path.abspath(path)
@@ -102,11 +105,25 @@ def main() -> None:
     if not all_files_ok:
         print("Some files are missing, aborted merge")
 
-    # Default output dir is home folder if not provided as command line argument
-    output_dir = os.path.expanduser("~") if not args.output_dir else args.output_dir
+    # if default config file exists, use default
+    if os.path.isfile(os.path.join(os.getcwd(), "defaults.json")):
+        with open("defaults.json", mode="r", encoding="utf-8") as f:
+            default_cfg = json.load(f)
+            if not os.path.isdir(default_cfg["output_dir"]):
+                print(
+                    "[ERR]  Invalid output directory in defaults.json, using current working directory instead"
+                )
+            else:
+                output_dir = default_cfg["output_dir"]
+
+    # Use command line argument output directory if supplied
+    if args.output_dir:
+        output_dir = args.output_dir
 
     # Build the ffmpeg concat file list
-    ff_file_list = ["file '" + filepath + "'" for filepath in args.files]
+    ff_file_list = [
+        "file '" + os.path.abspath(filepath) + "'" for filepath in args.files
+    ]
 
     # Get the first video file name and extension
     first_file = os.path.basename(args.files[0])
@@ -124,8 +141,9 @@ def main() -> None:
     #
     try:
         proc = ffmpeg_concat(ff_file_list_path, ff_file_output)
+        print(f"\n[OK]   Created file successfully: {ff_file_output}")
     except subprocess.CalledProcessError as e:
-        print(f"ffmpeg failed (code {e.returncode})")
+        print(f"[ERR]  ffmpeg failed (code {e.returncode})")
         print("STDOUT:", e.stdout)
         print("STDERR:", e.stderr)
         sys.exit(e.returncode)

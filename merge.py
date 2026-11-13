@@ -46,14 +46,22 @@ def parse_args() -> argparse.Namespace:
 # --------------------------------------------------------------------------- #
 # Helper functions
 # --------------------------------------------------------------------------- #
-
-
-def ffmpeg_concat(concat_list: str, filename: str):
-    # ffmpeg -f concat -safe 0 -i 2019_0821_121834_550.txt -c copy 2019_0821_121834_550.MOV
-
+def ffmpeg_check() -> str:
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path is None:
         raise RuntimeError("ffmpeg not found in PATH")
+
+    return ffmpeg_path
+
+
+def ffmpeg_concat(concat_list: str, filename: str, file_count: int):
+    # ffmpeg -f concat -safe 0 -i 2019_0821_121834_550.txt -c copy 2019_0821_121834_550.MOV
+
+    try:
+        ffmpeg_path = ffmpeg_check()
+    except RuntimeError as e:
+        print(f"[ERR]  {e}")
+        return 1
 
     ffmpeg_cmd = [
         ffmpeg_path,
@@ -69,16 +77,30 @@ def ffmpeg_concat(concat_list: str, filename: str):
         "-y",
     ]
 
-    result = subprocess.run(
+    process = subprocess.Popen(
         ffmpeg_cmd,
-        capture_output=True,  # capture stdout & stderr
-        text=True,  # return strings instead of bytes
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        universal_newlines=True,
+        bufsize=1,
     )
 
-    # Raise an exception if ffmpeg failed (non‑zero exit code)
-    result.check_returncode()
+    processed_files = 0
 
-    return result
+    try:
+        for line in process.stdout:
+            if "Auto-inserting" in line:
+                processed_files += 1
+                percent_text = f"{(processed_files / file_count) * 100:.2f}%"
+                sys.stdout.write(
+                    f"\r[WAIT] Processing: {processed_files}/{file_count} ({percent_text})"
+                )
+                sys.stdout.flush()
+    except KeyboardInterrupt:
+        process.terminate()
+        process.wait()
+
+    return process.poll()
 
 
 # --------------------------------------------------------------------------- #
@@ -140,15 +162,16 @@ def main() -> None:
 
     #
     try:
-        proc = ffmpeg_concat(ff_file_list_path, ff_file_output)
-        print(f"\n[OK]   Created file successfully: {ff_file_output}")
+        print(f"[WAIT] Merging {len(args.files)} files as {ff_file_output}...")
+        proc = ffmpeg_concat(ff_file_list_path, ff_file_output, len(args.files))
+        print(f"\n[OK]   Merged {len(args.files)} files: {ff_file_output}")
     except subprocess.CalledProcessError as e:
         print(f"[ERR]  ffmpeg failed (code {e.returncode})")
         print("STDOUT:", e.stdout)
         print("STDERR:", e.stderr)
         sys.exit(e.returncode)
-
-    os.remove(ff_file_list_path)
+    finally:
+        os.remove(ff_file_list_path)
 
 
 # --------------------------------------------------------------------------- #
